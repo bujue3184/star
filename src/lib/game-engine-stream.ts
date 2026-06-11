@@ -101,6 +101,21 @@ export async function nextTurnStream(
   const MAX_CONVERSATIONS = 100; // 硬上限，V4 自行决定何时结束
 
   while (conversationCount < MAX_CONVERSATIONS) {
+    // ── 检查游戏是否已被外部结束（如玩家点了"结束游戏"） ──
+    const currentStatus = await prisma.gameSession.findUnique({
+      where: { id: sessionId },
+      select: { status: true },
+    });
+    if (currentStatus?.status === "FINISHED") {
+      console.log(`[StreamEngine] 游戏已结束，停止 V4 循环`);
+      await prisma.round.update({
+        where: { id: round.id },
+        data: { finishedAt: new Date() },
+      });
+      await onEvent({ event: "round_complete", data: { finished: true, reason: "game_ended_by_user" } });
+      return;
+    }
+
     // V4 决定下一位谁发言
     const plan = await judge.orchestrate({
       sessionId, participants, globalRule,

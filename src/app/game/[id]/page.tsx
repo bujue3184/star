@@ -557,6 +557,29 @@ export default function GameRoom({
     }
   };
 
+  // 导出 Markdown 游戏记录
+  const handleExport = async () => {
+    try {
+      const res = await fetch(`/api/game/${id}/export`);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        throw new Error(`导出失败 (${res.status}): ${errText}`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `star-debate-${game?.name || id}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      console.error("[Room] ❌ 导出失败:", e.message);
+      setError(e.message);
+    }
+  };
+
   if (loading) {
     return (
       <div className="relative w-full h-full overflow-hidden bg-[#0a0a1a]">
@@ -642,6 +665,15 @@ export default function GameRoom({
               className="glass-card px-3 py-2 text-red-400/60 hover:text-red-400 border border-red-500/20 cursor-pointer text-sm"
             >
               ⛔ 结束游戏
+            </button>
+          )}
+
+          {(isInProgress || isFinished) && (
+            <button
+              onClick={handleExport}
+              className="glass-card px-3 py-2 text-white/60 hover:text-white cursor-pointer text-sm"
+            >
+              📥 导出
             </button>
           )}
 
