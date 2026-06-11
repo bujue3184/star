@@ -74,11 +74,33 @@ export async function startGame(sessionId: string) {
     },
   });
 
-  // 裁判裁定发言顺序（并存储到 globalRule.speakingOrder）
-  const judgeModel = globalRule.plugins?.judge?.config?.model || "ollama/qwen:7b";
   let speakingOrderIds: string[] = [];
 
-  try {
+  // 上帝模式不需要裁判裁定顺序
+  if ((globalRule as any).gameRules?.godMode) {
+    console.log("[GameEngine] 上帝模式，跳过裁判裁定顺序");
+    speakingOrderIds = session.participants.sort((a, b) => a.order - b.order).map((b) => b.id);
+    const defaultOrder = session.participants
+      .sort((a, b) => a.order - b.order)
+      .map((b, i) => `${i + 1}. ${b.name}`)
+      .join("\n");
+    await prisma.message.create({
+      data: {
+        roundId: round0.id,
+        content: `🎯 发言顺序（默认）：\n\n${defaultOrder}`,
+        role: "system",
+        skillSnapshot: "{}",
+      },
+    });
+    const updatedRule2 = { ...globalRule, speakingOrder: speakingOrderIds };
+    await prisma.gameSession.update({
+      where: { id: sessionId },
+      data: { globalRule: JSON.stringify(updatedRule2) },
+    });
+  } else {
+    // 裁判裁定发言顺序
+    const judgeModel = globalRule.plugins?.judge?.config?.model || "ollama/qwen:7b";
+    try {
     const { callModel } = await import("./model");
     const orderResult = await callModel({
       model: judgeModel as string,
@@ -150,6 +172,7 @@ export async function startGame(sessionId: string) {
       },
     });
   }
+  } // 关闭 else 块
 
   const updated = await prisma.gameSession.findUnique({
     where: { id: sessionId },

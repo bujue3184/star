@@ -19,6 +19,7 @@ export interface GlobalConfig {
   scoringDimensions: string[];
   promptTemplate: string;
   allowGodIntervention: boolean;
+  godMode: boolean; // 手动调度模式，无需导演模型
 }
 
 interface Props {
@@ -40,6 +41,7 @@ export function defaultGlobalConfig(): GlobalConfig {
     scoringDimensions: ["逻辑性", "事实正确性", "说服力"],
     promptTemplate: "讨论主题：{topic}\n发言规则：简明扼要，有理有据。",
     allowGodIntervention: true,
+    godMode: false,
   };
 }
 
@@ -144,26 +146,29 @@ export default function GlobalConfigModal({
             </div>
             <div className="flex-1">
               <label className="block text-white/60 text-sm mb-1.5">
-                上帝干预
+                调度模式
               </label>
               <label className="flex items-center gap-2 h-[42px] cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={form.allowGodIntervention}
-                  onChange={(e) =>
-                    update({ allowGodIntervention: e.target.checked })
-                  }
+                  checked={form.godMode}
+                  onChange={(e) => {
+                    update({ godMode: e.target.checked });
+                    if (e.target.checked) {
+                      update({ allowGodIntervention: true });
+                    }
+                  }}
                   className="w-4 h-4 accent-purple-500"
                 />
-                <span className="text-white/60 text-sm">启用</span>
+                <span className="text-white/60 text-sm">上帝模式（手动调度，无需导演模型）</span>
               </label>
             </div>
           </div>
 
-          {/* 裁判模型 */}
-          <div>
+          {/* 裁判模型（上帝模式不需要） */}
+          {!form.godMode && <div>
             <label className="block text-white/60 text-sm mb-1.5">
-              裁判模型
+              导演模型
             </label>
             <select
               className="dark-input"
@@ -184,10 +189,10 @@ export default function GlobalConfigModal({
                 ⚠️ 未检测到 Ollama，使用默认模型
               </p>
             )}
-          </div>
+          </div>}
 
           {/* 裁判 API Key（云端模型时需要） */}
-          {form.judgeModel && !form.judgeModel.startsWith("ollama/") && (
+          {!form.godMode && form.judgeModel && !form.judgeModel.startsWith("ollama/") && (
             <>
               <div>
                 <label className="block text-white/60 text-sm mb-1.5">
@@ -222,8 +227,6 @@ export default function GlobalConfigModal({
               </div>
             </>
           )}
-
-          {/* 裁判工作内容 */}
           <div>
             <label className="block text-white/60 text-sm mb-1.5">
               裁判工作内容（将在每轮发给裁判）

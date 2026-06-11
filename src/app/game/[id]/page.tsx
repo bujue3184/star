@@ -70,6 +70,12 @@ export default function GameRoom({
   const [streamingBot, setStreamingBot] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState("");
   const streamedRef = useRef(""); // 不使用 state 频繁更新
+  // ── 手动模式 ──
+  const [directLoading, setDirectLoading] = useState(false);
+  const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
+  const [selectedBotName, setSelectedBotName] = useState("");
+  const [godInstruction, setGodInstruction] = useState("");
+
   // ── 裁判建议 + 上帝结束 ──
   const [judgeSuggestion, setJudgeSuggestion] = useState<{
     winnerId: string;
@@ -144,7 +150,7 @@ export default function GameRoom({
       setGame(data);
       setLoading(false);
       console.log(
-        `[GameRoom] ✅ 加载完成: status=${data.status}, round=${data.currentRound}/${data.maxRounds}`
+        `[GameRoom] ✅ 加载完成: status=${data.status}, 对话数=${data.rounds?.length || 0}`
       );
     } catch (e: any) {
       console.error("[GameRoom] ❌ 加载失败:", e.message);
@@ -195,6 +201,11 @@ export default function GameRoom({
       sceneRef.current?.setPlanetThinking(null);
       setStartLoading(false);
       loadGame();
+      // 自动模式开始V4调度，手动模式等玩家操作
+      const isGodMode = game?.globalRule?.gameRules?.godMode === true;
+      if (!isGodMode) {
+        setTimeout(() => handleNextTurn(), 500);
+      }
     } catch (e: any) {
       console.error("[GameRoom] ❌ 开始失败:", e.message);
       sceneRef.current?.setPlanetThinking(null);
@@ -213,9 +224,27 @@ export default function GameRoom({
     setStreamingBot(null);
     streamedRef.current = "";
 
-    // 展开最新回合（为流式输出做准备）
+    // 预创建轮次占位（确保 bot_done 能立即插入消息）
     if (game) {
-      setExpandedRound(game.currentRound + 1);
+      const nextRoundNum = game.currentRound + 1;
+      setExpandedRound(nextRoundNum);
+      setGame((prev) => {
+        if (!prev) return prev;
+        const exists = prev.rounds.some((r) => r.roundNumber === nextRoundNum);
+        if (!exists) {
+          return {
+            ...prev,
+            rounds: [...prev.rounds, {
+              id: "round-" + nextRoundNum,
+              roundNumber: nextRoundNum,
+              startedAt: new Date().toISOString(),
+              finishedAt: null,
+              messages: [],
+            }],
+          };
+        }
+        return prev;
+      });
     }
 
     try {
@@ -274,6 +303,27 @@ export default function GameRoom({
                   if (data.instruction) {
                     sceneRef.current?.showStarDirective("🎯 " + data.instruction);
                   }
+                  // 确保该轮次在本地 state 中存在（用于即时展示）
+                  if (data.roundNumber !== undefined && game) {
+                    setGame((prev) => {
+                      if (!prev) return prev;
+                      const exists = prev.rounds.some((r) => r.roundNumber === data.roundNumber);
+                      if (!exists) {
+                        return {
+                          ...prev,
+                          rounds: [...prev.rounds, {
+                            id: "stream-round-" + data.roundNumber,
+                            roundNumber: data.roundNumber,
+                            startedAt: new Date().toISOString(),
+                            finishedAt: null,
+                            messages: [],
+                          }],
+                        };
+                      }
+                      return prev;
+                    });
+                    setExpandedRound(data.roundNumber);
+                  }
                   setStreamingBot(data.botName);
                   setStreamingText("");
                   streamedRef.current = "";
@@ -304,31 +354,42 @@ export default function GameRoom({
                 // 立即将发言插入本地 state，不用等 loadGame()
                 setStreamingBot(null);
                 setStreamingText("");
-                if (data.content && game) {
-                  const latestRound = [...game.rounds].sort((a, b) => b.roundNumber - a.roundNumber)[0];
-                  if (latestRound) {
-                    const newMsg = {
-                      id: "stream-" + Date.now(),
-                      roundId: latestRound.id,
-                      gameBotId: "",
-                      content: data.content,
-                      role: "assistant",
-                      createdAt: new Date().toISOString(),
-                      gameBot: { id: "", name: data.botName || "" },
-                      skillSnapshot: "{}",
-                    };
-                    setGame((prev) => {
-                      if (!prev) return prev;
-                      return {
-                        ...prev,
-                        rounds: prev.rounds.map((r) =>
-                          r.id === latestRound.id
-                            ? { ...r, messages: [...r.messages, newMsg] }
-                            : r
-                        ),
+                if (data.content) {
+                  const msgRoundNum = data.roundNumber || 1;
+                  const newMsg = {
+                    id: "msg-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
+                    roundId: "round-" + msgRoundNum,
+                    gameBotId: "",
+                    content: data.content,
+                    role: "assistant",
+                    createdAt: new Date().toISOString(),
+                    gameBot: { id: "", name: data.botName || "" },
+                    skillSnapshot: "{}",
+                  };
+                  setGame((prev) => {
+                    if (!prev) return prev;
+                    // 找到或创建该轮次
+                    let rounds = prev.rounds;
+                    let round = rounds.find((r) => r.roundNumber === msgRoundNum);
+                    if (!round) {
+                      round = {
+                        id: "round-" + msgRoundNum,
+                        roundNumber: msgRoundNum,
+                        startedAt: new Date().toISOString(),
+                        finishedAt: null,
+                        messages: [],
                       };
-                    });
-                  }
+                      rounds = [...rounds, round];
+                    }
+                    return {
+                      ...prev,
+                      rounds: rounds.map((r) =>
+                        r.id === round!.id
+                          ? { ...r, messages: [...r.messages, newMsg] }
+                          : r
+                      ),
+                    };
+                  });
                 }
                 break;
 
@@ -384,6 +445,81 @@ export default function GameRoom({
       setError(e.message);
     } finally {
       setTurnLoading(false);
+    }
+  };
+
+  // 上帝手动调用某模型发言
+  const handleDirectInstruction = async () => {
+    if (!selectedBotId || !godInstruction.trim() || directLoading) return;
+    setDirectLoading(true);
+    setStreamingText("");
+    setStreamingBot(null);
+    streamedRef.current = "";
+
+    try {
+      const res = await fetch(`/api/game/${id}/direct/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ botId: selectedBotId, instruction: godInstruction.trim() }),
+      });
+      if (!res.ok) throw new Error("请求失败");
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("无法读取流");
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+        for (const part of parts) {
+          const lines = part.split("\n");
+          let eventType = "", dataStr = "";
+          for (const line of lines) {
+            if (line.startsWith("event: ")) eventType = line.slice(7);
+            if (line.startsWith("data: ")) dataStr = line.slice(6);
+          }
+          if (!eventType || !dataStr) continue;
+          try {
+            const data = JSON.parse(dataStr);
+            if (eventType === "token") {
+              streamedRef.current += data.text || "";
+              setStreamingText(streamedRef.current);
+              if (data.botIndex !== undefined) {
+                sceneRef.current?.setBubbleText(data.botIndex, streamedRef.current);
+              }
+            }
+            if (eventType === "bot_done") {
+              sceneRef.current?.hideAllBubbles();
+              sceneRef.current?.hideStarDirective();
+              setStreamingBot(null);
+              setStreamingText("");
+              setGodInstruction("");
+              loadGame();
+            }
+            if (eventType === "thinking") {
+              sceneRef.current?.setPlanetThinking(null);
+              if (data.botIndex !== undefined) {
+                sceneRef.current?.setPlanetThinking(data.botIndex);
+                sceneRef.current?.hideAllBubbles();
+                sceneRef.current?.setBubbleText(data.botIndex, "");
+                if (selectedBotId) {
+                  const bot = game?.participants.find(p => p.id === selectedBotId);
+                  if (bot) sceneRef.current?.showStarDirective("🎯 " + godInstruction);
+                }
+              }
+              setStreamingBot(data.botName);
+            }
+          } catch {}
+        }
+      }
+    } catch (e: any) {
+      console.error("[GodMode] ❌ 指令失败:", e.message);
+    } finally {
+      setDirectLoading(false);
     }
   };
 
@@ -456,6 +592,7 @@ export default function GameRoom({
   const isInProgress = game.status === "IN_PROGRESS";
   const isFinished = game.status === "FINISHED";
   const winner = game.participants.find((b) => b.id === game.winnerBotId);
+  const godMode = game.globalRule?.gameRules?.godMode === true;
 
   return (
     <div className="relative w-full h-full overflow-hidden">
@@ -488,10 +625,6 @@ export default function GameRoom({
         </div>
 
         <div className="flex items-center gap-3">
-          <span className="text-white/40 text-sm">
-            第 {game.currentRound}/{game.maxRounds} 轮
-          </span>
-
           {isWaiting && (
             <button
               onClick={handleStart}
@@ -503,22 +636,13 @@ export default function GameRoom({
           )}
 
           {isInProgress && (
-            <>
-              <button
-                onClick={handleNextTurn}
-                disabled={turnLoading}
-                className="glow-button flex items-center gap-2"
-              >
-                {turnLoading ? "⏳ 进行中..." : "▶ 下一回合"}
-              </button>
-              <button
-                onClick={() => handleEndGame("god_end")}
-                disabled={turnLoading || endGameLoading}
-                className="glass-card px-3 py-2 text-red-400/60 hover:text-red-400 border border-red-500/20 hover:border-red-500/40 transition-colors cursor-pointer text-sm"
-              >
-                ⛔ 结束游戏
-              </button>
-            </>
+            <button
+              onClick={() => handleEndGame("god_end")}
+              disabled={endGameLoading}
+              className="glass-card px-3 py-2 text-red-400/60 hover:text-red-400 border border-red-500/20 cursor-pointer text-sm"
+            >
+              ⛔ 结束游戏
+            </button>
           )}
 
           <button
@@ -530,8 +654,8 @@ export default function GameRoom({
         </div>
       </header>
 
-      {/* 上帝干预输入框 */}
-      {isInProgress && (
+      {/* 上帝干预（自动模式） */}
+      {isInProgress && !godMode && (
         <div
           className="absolute bottom-6 left-6 z-10 pointer-events-none"
           style={{ right: sidebarOpen ? sidebarWidth + 24 : 24 }}
@@ -543,18 +667,61 @@ export default function GameRoom({
               onChange={(e) => setGodInput(e.target.value)}
               placeholder="上帝干预指令（可选）..."
               onKeyDown={(e) => {
-                if (e.key === "Enter" && godInput.trim()) {
-                  handleNextTurn();
-                }
+                if (e.key === "Enter" && godInput.trim()) handleNextTurn();
               }}
             />
-            <button
-              onClick={handleNextTurn}
-              disabled={turnLoading}
-              className="glow-button"
-            >
+            <button onClick={handleNextTurn} disabled={turnLoading} className="glow-button">
               {turnLoading ? "..." : "发送"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 手动模式：选手按钮 + 指令输入 */}
+      {isInProgress && godMode && (
+        <div
+          className="absolute bottom-6 left-6 z-10 pointer-events-none"
+          style={{ right: sidebarOpen ? sidebarWidth + 24 : 24 }}
+        >
+          <div className="pointer-events-auto glass-card p-4 space-y-3 max-w-xl">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-white/50 text-xs">选择发言者：</span>
+              {game?.participants.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => {
+                    setSelectedBotId(p.id);
+                    setSelectedBotName(p.name);
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-sm cursor-pointer transition-colors ${
+                    selectedBotId === p.id
+                      ? "bg-accent text-white"
+                      : "bg-white/10 text-white/60 hover:text-white"
+                  }`}
+                >
+                  {p.name}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input
+                className="dark-input flex-1"
+                value={godInstruction}
+                onChange={(e) => setGodInstruction(e.target.value)}
+                placeholder={selectedBotId ? `输入对 ${selectedBotName} 的指令...` : "先选择发言者"}
+                disabled={!selectedBotId}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && selectedBotId && godInstruction.trim()) handleDirectInstruction();
+                }}
+              />
+              <button
+                onClick={handleDirectInstruction}
+                disabled={!selectedBotId || !godInstruction.trim() || directLoading}
+                className="glow-button"
+              >
+                {directLoading ? "..." : "🎯 指令"}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -588,9 +755,11 @@ export default function GameRoom({
             <p className="text-white/70 mb-1">
               {judgeSuggestion.reason}
             </p>
-            <p className="text-yellow-400 text-lg font-bold mb-6">
-              🏆 建议胜者：{judgeSuggestion.winnerName}
-            </p>
+            {judgeSuggestion.winnerName && (
+              <p className="text-yellow-400 text-lg font-bold mb-6">
+                🏆 建议胜者：{judgeSuggestion.winnerName}
+              </p>
+            )}
             <div className="flex gap-3 justify-center">
               <button
                 onClick={() => {

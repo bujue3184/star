@@ -90,6 +90,12 @@ export default function BotConfigModal({
 
   const isCloudModel = form.model.startsWith("openai/") || form.model.startsWith("deepseek/") || form.model.startsWith("volcengine/") || form.model.startsWith("dashscope/");
 
+  // ── 自定义模型判断 ──
+  const CUSTOM_VALUE = "__custom__";
+  const modelsLoaded = models.length > 0;
+  const isKnownModel = modelsLoaded && models.some(m => m.name === form.model);
+  const selectValue = !modelsLoaded ? form.model : isKnownModel ? form.model : CUSTOM_VALUE;
+
   // 测试模型连通性
   const handleTest = async () => {
     console.log(`[BotConfig] 测试模型连通性: ${form.model}`);
@@ -182,8 +188,16 @@ export default function BotConfigModal({
             <div className="flex gap-2">
               <select
                 className="dark-input flex-1"
-                value={form.model}
-                onChange={(e) => update({ model: e.target.value })}
+                value={selectValue}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === CUSTOM_VALUE) {
+                    // 切换到自定义模式，清空让用户手动输入
+                    update({ model: "" });
+                  } else {
+                    update({ model: v });
+                  }
+                }}
               >
                 {models.length === 0 && (
                   <option value="ollama/qwen:7b">加载中...</option>
@@ -193,6 +207,11 @@ export default function BotConfigModal({
                     {m.name} {m.local ? `(${m.size})` : "☁️"}
                   </option>
                 ))}
+                {modelsLoaded && (
+                  <option value={CUSTOM_VALUE}>
+                    ✏️ 手动输入模型名...
+                  </option>
+                )}
               </select>
               <button
                 onClick={handleTest}
@@ -208,6 +227,20 @@ export default function BotConfigModal({
                 {testing ? "..." : testResult === "ok" ? "✅" : testResult === "fail" ? "❌" : "测试"}
               </button>
             </div>
+            {/* 自定义模型输入框 */}
+            {selectValue === CUSTOM_VALUE && (
+              <div className="mt-2">
+                <input
+                  className="dark-input"
+                  value={form.model}
+                  onChange={(e) => update({ model: e.target.value })}
+                  placeholder="例如: volcengine/doubao-seed-2-0pro-250421"
+                />
+                <p className="text-white/30 text-xs mt-1">
+                  格式: <code>提供商/模型名</code>，如 openai/gpt-4o、volcengine/xxx
+                </p>
+              </div>
+            )}
           </div>
 
           {/* API Key（云端模型） */}

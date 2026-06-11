@@ -138,6 +138,7 @@ export default function Home() {
         minBots: 2,
         maxBots: 6,
         allowGodIntervention: globalConfig.allowGodIntervention,
+        godMode: globalConfig.godMode,
       },
       plugins: {
         judge: {

@@ -48,6 +48,12 @@ export async function nextTurnStream(
   if (session.status !== "IN_PROGRESS")
     throw new Error("Game is not in progress");
 
+  // 上帝模式禁止 V4 自动统筹
+  const globalRuleParsed = JSON.parse(session.globalRule);
+  if ((globalRuleParsed as any).gameRules?.godMode) {
+    throw new Error("上帝模式下禁止自动统筹，请使用手动指令");
+  }
+
   if (session.currentRound >= session.maxRounds) {
     await endGame(sessionId);
     await onEvent({ event: "round_complete", data: { finished: true, reason: "max_rounds_reached" } });
@@ -92,14 +98,14 @@ export async function nextTurnStream(
   }));
 
   let conversationCount = 0;
-  const MAX_CONVERSATIONS = Math.max(session.maxRounds * 2, 10);
+  const MAX_CONVERSATIONS = 100; // 硬上限，V4 自行决定何时结束
 
   while (conversationCount < MAX_CONVERSATIONS) {
     // V4 决定下一位谁发言
     const plan = await judge.orchestrate({
       sessionId, participants, globalRule,
       currentRound: conversationCount + 1,
-      maxRounds: MAX_CONVERSATIONS,
+      maxRounds: Math.max(session.maxRounds * 2, 10), // 仅供参考
     });
 
     // V4 认为可以结束 → 给前端发裁判建议，让玩家确认
@@ -129,7 +135,7 @@ export async function nextTurnStream(
     const bot = session.participants.find((p) => p.id === item.botId);
     if (!bot) continue;
 
-    await onEvent({ event: "thinking", data: { botIndex: bot.order, botName: bot.name, instruction: item.instruction } });
+    await onEvent({ event: "thinking", data: { botIndex: bot.order, botName: bot.name, instruction: item.instruction, roundNumber: round.roundNumber } });
 
     const botConfig: BotConfig = {
       name: bot.name,
@@ -197,7 +203,7 @@ export async function nextTurnStream(
 
       await onEvent({
         event: "bot_done",
-        data: { botIndex: bot.order, botName: bot.name, content: fullContent },
+        data: { botIndex: bot.order, botName: bot.name, content: fullContent, roundNumber: round.roundNumber },
       });
 
       // 记录到 chatHistory 供下个 Bot 参考
